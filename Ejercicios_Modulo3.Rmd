@@ -237,3 +237,269 @@ dev.off()
 
 ### Batch detection
 
+```{r BatchDetection, message=False, warning=FALSE}
+# loas library
+require(pvca)
+pData(eset_rma) <- targets
+
+# select de threshold
+pct_threshold <- 0.6
+# select the factors to analyze
+batch.factors <- c("Genotype", "Temperature")
+# run the analysis
+pvcaObj <- pvcaBatchAssess(eset_rma, batch.factors, pct_threshold)
+
+```
+
+```{r plotPVCA, fig.cap="Relative importance of the different factors -genotype, temperature and interaction - affecting gene expression"}
+
+# plot PVCA results
+bp <- barplot(pvcaObj$dat, xlab = "Effects", 
+              ylab = "Weighted average proportion variance", ylim = c(0, 1.1),
+              col = c("mediumorchid"), las = 2, main = "PVCA estimation")
+axis(1, at = bp, labels = pvcaObj$label, cex.axis = 0.55, las = 2)
+values = pvcaObj$dat
+new_values = round(values, 3)
+text(bp, pvcaObj$dat, labels = new_values, pos = 3, cex = 0.5)
+
+```
+
+Guardamos el gráfico en la carpeta correspondiente.
+
+```{r savePVCAplot, echo =FALSE, results='hide'}
+tiff("figures/PVCAplot.tiff", res = 150, width = 5, height = 5, units = 'in')
+bp <- barplot(pvcaObj$dat, xlab = "Effects", 
+              ylab = "Weighted average proportion variance", ylim = c(0, 1.1),
+              col = c("mediumorchid"), las = 2, main = "PVCA estimation")
+axis(1, at = bp, labels = pvcaObj$label, cex.axis = 0.55, las = 2)
+values = pvcaObj$dat
+new_values = round(values, 3)
+text(bp, pvcaObj$dat, labels = new_values, pos = 3, cex = 0.5)
+dev.off()
+
+```
+
+
+### Detecting most variable genes
+
+Graficar la variabilidad media de todos lo genes es util para saber qué porcentaje de genes muestran una variablilidad que se puede atribuir a otras causas más allá de la variabilidad aleatoria. 
+
+```{r SDPlot, fig.cap="Values of standard deviations allong all samples for all genes ordered fron samallest to biggest"}
+sds <- apply(exprs(eset_rma), 1, sd)
+sdsO <- sort(sds)
+plot(1:length(sdsO), sdsO, main = "Distributios of variability for all genes", 
+     sub = "Vertical lines represent 90% and 95% percentiles", 
+     xlab = "Gene index (from least to most variable)",
+     ylab = "Standard deviation")
+abline(v = length(sds)*c(0.9, 0.95))
+
+```
+
+
+Guardamos el gráfico generado
+
+```{r saveSDplot, echo=FALSE, results='hide'}
+tiff("figures/SDplot.tiff", res = 150, width = 5, height = 5, units = 'in')
+plot(1:length(sdsO), sdsO, main = "Distributios of variability for all genes", 
+     sub = "Vertical lines represent 90% and 95% percentiles", 
+     xlab = "Gene index (from least to most variable)",
+     ylab = "Standard deviation")
+abline(v = length(sds)*c(0.9, 0.95))
+dev.off()
+
+```
+
+
+### Filtering least variable genes
+
+A continuación se filtrarán aquellos genes cuya varaibilidad se puede atribuir a la aleaatoriedad, ya que se espera que no tengan una expresión diferencial. Para ellos emplearemos la funación `nsFilter`del paquete de bioconductor `geneFilter`
+
+```{r Filtering1, results='hide', message=FALSE}
+require(genefilter)
+require(mogene21sttranscriptcluster.db)
+annotation(eset_rma) <- "mogene21sttranscriptcluster.db"
+filtered <- nsFilter(eset_rma, require.entrez = TRUE, remove.dupEntrez = TRUE, 
+                     var.filter = TRUE, var.func = IQR, var.cutoff = 0.75, 
+                     filterByQuantile = TRUE, feature.exclude = "^AFFX")
+
+
+```
+
+```{r FilterResults1, results='hide', echo=FALSE}
+names(filtered)
+class(filtered)
+
+```
+```{r FilterResults2}
+print(filtered$filter.log)
+eset_filtered <- filtered$eset
+
+```
+
+
+### Saving normalized and filteres data
+
+```{r SaveData1, results='hide', message=FALSE} 
+write.csv(exprs(eset_rma), file = "./results/normalized.Data.csv")
+write.csv(exprs(eset_filtered), file = "./results/normalized.Filtered.Data.csv")
+save(eset_rma, eset_filtered, file = "./results/normalized.Data.Rda")
+
+```
+
+### Defining the experimental setup: The design matrix
+
+En este modelo vamos a aplicar los modelos lineales para microarrays implementados en el paquete `limma`. 
+
+El primer paso para análisis basados en modelos lineales es crear la matriz de diseño.
+
+```{r LoadSavedData}
+if (!exists("eset_filtered")) load (file = "./results/nomarlized.Data.Rda")
+
+```
+
+```{r DesignMatrix, message=FALSE}
+require(limma)
+designMat <- model.matrix(~ 0 + Group, pData(eset_filtered))
+colnames(designMat) <- c("KO.COLD", "KO.RT", "WT.COLD", "WT.RT")
+print(designMat)
+
+```
+
+
+### Defining comparisons with the Contrast Matrix
+
+En este caso, queremos comparar el efecto de gene KO vs WT, de manera independiente para las condiciones RT y COLD. También queremos comparar si hay alguna intereacción entre el gen y la temperatura, para ello tenemos que hacer 3 comparaciones:
+
+```{r, setContrast}
+cont.matrix <- makeContrasts(KOvsWT.COLD = KO.COLD-WT.COLD, 
+                             KOvsWT.RT = KO.RT-WT.RT, 
+                             INT = (KO.COLD-WT.COLD) - (KO.RT -WT.RT),
+                             levels = designMat)
+print(cont.matrix)
+
+```
+
+
+### Model estimation and gene selection
+
+```{r, linealmodelfit}
+require(limma)
+fit <- lmFit(eset_filtered, designMat)
+fit.main <- contrasts.fit(fit, cont.matrix)
+fit.main <- eBayes(fit.main)
+class(fit.main)
+
+```
+
+
+### Obtaining lists of differentially expressed genes
+
+la función `topTable` del paquete `limma` contiene, para un contraste dado, una lista de genes ordenados de menor a mayor p-valor, por lo que se pueden considerar desde los más a los menos expresados diferencialmente. 
+
+Para la comparación KOvsWT.COLD
+
+```{r topTabs1}
+topTab_KOvsWT.COLD <- topTable(fit.main, number = nrow(fit.main), 
+                               coef = "KOvsWT.COLD", adjust = "fdr")
+head(topTab_KOvsWT.COLD)
+
+```
+ 
+ Para la comparación KOvsWT.RT
+ 
+```{r topTabs2}
+topTab_KOvsWT.RT <- topTable(fit.main, number = nrow(fit.main), 
+                               coef = "KOvsWT.RT", adjust = "fdr")
+head(topTab_KOvsWT.RT)
+
+```
+ 
+ Para la comparación INT
+ 
+```{r topTabs3}
+topTab_INT <- topTable(fit.main, number = nrow(fit.main), 
+                               coef = "INT", adjust = "fdr")
+head(topTab_INT)
+
+```
+ 
+En la primera columna de cada tabla tenemos el ID para cada probeset de Affymetrix.
+
+### Gene Annotation
+
+En este proceso se busca información asociada con los IDs que aparecen en las 
+top tables, para darles nombres de Gene Symbol, Entrez Gene identifiers o Gene description. 
+
+Al haber 3 top tables, para simplificar el proceso, se define una función que realice este proceso. 
+
+```{r Gene Annotation, message=FALSE, warning=FALSE}
+
+annotatedTopTable <- function(topTab, anotPackage){
+  topTab <- cbind(PROBEID = rownames(topTab), topTab)
+  myProbes <- rownames(topTab)
+  thePackage <- eval(parse(text = anotPackage))
+  geneAnots <- select(thePackage, myProbes, c("SYMBOL", "ENTREZID", "GENENAME"))
+  annotatedTopTab <- merge(x = geneAnots, y = topTab, by.x = "PROBEID", 
+                           by.y = "PROBEID")
+  return(annotatedTopTab)
+  }
+
+```
+
+
+Aplicamos la función a las top tables realizadas
+
+```{r annotatedTopTables}
+topAnnotated_KOvsWT.COLD <- annotatedTopTable(topTab_KOvsWT.COLD, anotPackage = "mogene21sttranscriptcluster.db")
+topAnnotated_KOvsWT.RT <- annotatedTopTable(topTab_KOvsWT.RT, anotPackage = "mogene21sttranscriptcluster.db")
+topAnnotated_INT<- annotatedTopTable(topTab_INT, anotPackage = "mogene21sttranscriptcluster.db")
+write.csv(topAnnotated_KOvsWT.COLD, file = "./results/topAnnotated_KOvsWT.COLD.csv")
+write.csv(topAnnotated_KOvsWT.RT, file = "./results/topAnnotated_KOvsWT.RT.csv")
+write.csv(topAnnotated_INT, file = "./results/topAnnotated_INT.csv")
+
+```
+
+Podemos visualizar una tabla ya anotada
+
+```{r annotatedTop, echo=FALSE}
+short <- head(topAnnotated_KOvsWT.COLD[1:5, 1:4])
+knitr::kable(
+  short, booktabs = TRUE, caption = 'Annotations added to results "topTable" for the comparison "KOvsWT.COLD"'
+)
+
+```
+
+### Visualizing differential expression:
+
+Para visualizar expresión diferencial se pueden emplear volcano-plots. 
+
+```{r volcanoPlot, fig.cap="Volcano plot for the comparison between KO and WT in COLD temperature. The namos of the top 4 genes(i.e. the first 4 genes in the topTable) are shown in the plot}
+require(mogene21sttranscriptcluster.db)
+geneSymbols <- select(mogene21sttranscriptcluster.db, row.names(fit.main), 
+                      c("SYMBOL"))
+SYMBOLS <- geneSymbols$SYMBOL
+volcanoplot(fit.main, coef = 1, highlight = 4, names = SYMBOLS, 
+            main = paste("Differentially expressed genes", colnames(cont.matrix)[1], sep = "\n"))
+abline(v = c(-1, 1))
+
+```
+
+Guardamos el volcano plot en la carpeta correspondiente
+
+```{r saveVolcanos, echo=FALSE, results='hide'}
+tiff("figures/VolcanoPlot.tiff", res = 150, width = 5, height = 5, units = 'in')
+volcanoplot(fit.main, coef = 1, highlight = 4, names = SYMBOLS, 
+            main = paste("Differentially expressed genes", colnames(cont.matrix)[1], sep = "\n"))
+abline(v = c(-1, 1))
+dev.off()
+
+pdf("figures/Volcanos.pdf")
+for (i in colnames(cont.matrix)){
+  volcanoplot(fit.main, coef = i, highlight = 4, names = SYMBOLS, 
+              main = paste("Differentially expressed genes", i, sep = "\n"))
+  abline(v = c(-1, 1))
+}
+dev.off()
+```
+
+### Multiple Comparisons
