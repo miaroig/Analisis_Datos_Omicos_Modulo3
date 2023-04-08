@@ -115,7 +115,7 @@ El siguiente paso es comprobar que los datos crudos guardados presentan suficien
 `ArrayQualityMetrics` que realiza diferentes aproximaciones a la calidad de los datos.  Es importante indicar correctamente el archivo de destino de los resultado
 
 ```{r QCRaw, message=FALSE, warning=FALSE, eval=FALSE}
-require(arrayQualityMetrics)
+library(arrayQualityMetrics)
 arrayQualityMetrics(rawData, outdir = file.path("./results", "QCDir.Raw"), force=TRUE)
 
 ```
@@ -124,8 +124,8 @@ arrayQualityMetrics(rawData, outdir = file.path("./results", "QCDir.Raw"), force
 También podemos realizar un PCA análisis con la siguiente función.
 
 ```{r}
-require(ggplot2)
-require(ggrepel)
+library(ggplot2)
+library(ggrepel)
 plotPCA3 <- function (datos, labels, factor, title, scale,colores, size = 1.5, glineas = 0.25) {
   data <- prcomp(t(datos),scale=scale)
   # plot adjustments
@@ -238,8 +238,8 @@ dev.off()
 ### Batch detection
 
 ```{r BatchDetection, message=False, warning=FALSE}
-# loas library
-require(pvca)
+# load library
+library(pvca)
 pData(eset_rma) <- targets
 
 # select de threshold
@@ -315,8 +315,8 @@ dev.off()
 A continuación se filtrarán aquellos genes cuya varaibilidad se puede atribuir a la aleaatoriedad, ya que se espera que no tengan una expresión diferencial. Para ellos emplearemos la funación `nsFilter`del paquete de bioconductor `geneFilter`
 
 ```{r Filtering1, results='hide', message=FALSE}
-require(genefilter)
-require(mogene21sttranscriptcluster.db)
+library(genefilter)
+library(mogene21sttranscriptcluster.db)
 annotation(eset_rma) <- "mogene21sttranscriptcluster.db"
 filtered <- nsFilter(eset_rma, require.entrez = TRUE, remove.dupEntrez = TRUE, 
                      var.filter = TRUE, var.func = IQR, var.cutoff = 0.75, 
@@ -358,7 +358,7 @@ if (!exists("eset_filtered")) load (file = "./results/nomarlized.Data.Rda")
 ```
 
 ```{r DesignMatrix, message=FALSE}
-require(limma)
+library(limma)
 designMat <- model.matrix(~ 0 + Group, pData(eset_filtered))
 colnames(designMat) <- c("KO.COLD", "KO.RT", "WT.COLD", "WT.RT")
 print(designMat)
@@ -383,7 +383,7 @@ print(cont.matrix)
 ### Model estimation and gene selection
 
 ```{r, linealmodelfit}
-require(limma)
+library(limma)
 fit <- lmFit(eset_filtered, designMat)
 fit.main <- contrasts.fit(fit, cont.matrix)
 fit.main <- eBayes(fit.main)
@@ -474,7 +474,7 @@ knitr::kable(
 Para visualizar expresión diferencial se pueden emplear volcano-plots. 
 
 ```{r volcanoPlot, fig.cap="Volcano plot for the comparison between KO and WT in COLD temperature. The namos of the top 4 genes(i.e. the first 4 genes in the topTable) are shown in the plot}
-require(mogene21sttranscriptcluster.db)
+library(mogene21sttranscriptcluster.db)
 geneSymbols <- select(mogene21sttranscriptcluster.db, row.names(fit.main), 
                       c("SYMBOL"))
 SYMBOLS <- geneSymbols$SYMBOL
@@ -507,7 +507,7 @@ dev.off()
 La función `decideTest` y `VennDiagram` del paquete `limma` se pueden emplear para anotar y contar los genes seleccionados en cada comparación realizada. 
 
 ```{r decideTest.1}
-require(limma)
+library(limma)
 res <- decideTests(fit.main, methos = "separate", adjust.method = "fdr", 
                    p.value = 0.1, lfc = 1)
 
@@ -546,5 +546,230 @@ dev.off()
 
 ### Heat Maps
 
+Se emplean para visualizar los genes expresados diferencialmente. Normalmente, es preferible realizar un clustering gerarquico para encontrar genes con patarones comunes de variación.
+
+```{r data4Heatmap}
+probesInHeatmap <- row.names(res.selected)
+HMdata <- exprs(eset_filtered)[rownames(exprs(eset_filtered)) %in% probesInHeatmap, ]
+
+geneSymbols <- select(mogene21sttranscriptcluster.db, rownames(HMdata), c("SYMBOL"))
+SYMBOLS <- geneSymbols$SYMBOL
+rownames(HMdata) <- SYMBOLS
+write.csv(HMdata, file = file.path("./results/data4Heatmap.csv"))
+
+```
+
+Con estos datos seleccionados se puede representar el heatmap con o sin realización del clustering. 
+
+A continuación realizamos la representación de todos los genes seleccionados con el criterio indicado en pasos anteriores (FDR < 0.1 y logFC >1) sin clustering
+
+```{r heatmapNoclustering, fig.cap="Heatmap for expression data without any grouping"}
+
+my_palette <- colorRampPalette(c("blue", "red"))(n = 299)
+library(gplots)
+
+heatmap.2(HMdata, 
+          Rowv = FALSE, 
+          Colv = FALSE, 
+          main = "Differentially expressed genes \n FDR < 0.1, logFC >= 1", 
+          scale = "row", 
+          col = my_palette, 
+          sepcolor = "white", 
+          sepwidth = c(0.05, 0.05), 
+          cexRow = 0.5, 
+          cexCol = 0.9, 
+          key = TRUE, 
+          keysize = 1.5, 
+          density.info = "histogram", 
+          ColSideColors = c(rep("red", 3), rep("blue", 3), rep("green", 3), rep("yellow", 3)), 
+          tracecol = NULL, 
+          dendrogram = "none", 
+          srtCol = 30)
+
+```
+
+
+O podemos realizar el heatmap con los genes y las muesrtas agrupadas por fila y columna con similaridades. 
+
+```{r heatmapClustering, fig.cap="Heatmap for expression data grouping genes (rows) an samples (columns), by their similarity"}
+
+heatmap.2(HMdata,
+          Rowv = TRUE,
+          Colv = TRUE,
+          dendrogram = "both",
+          main = "Differentially expressed genes \n FDR < 0,1, logFC >=1",
+          scale = "row",
+          col = my_palette,
+          sepcolor = "white",
+          sepwidth = c(0.05,0.05),
+          cexRow = 0.5,
+          cexCol = 0.9,
+          key = TRUE,
+          keysize = 1.5,
+          density.info = "histogram",
+          ColSideColors = c(rep("red",3),rep("blue",3), rep("green",3), rep("yellow",3)),
+          tracecol = NULL,
+          srtCol = 30)
+
+
+```
+
+Guarmdamos ambos heatmaps
+
+```{r, echo=FALSE, results='hide'}
+
+tiff("figures/Heatmap1.tiff", res = 150, width = 5.5, height = 5.5, units = 'in')
+heatmap.2(HMdata,
+          Rowv = TRUE,
+          Colv = TRUE,
+          main = "Differentially expressed genes \n FDR < 0,1, logFC >=1",
+          scale = "row",
+          col = my_palette,
+          sepcolor = "white",
+          sepwidth = c(0.05,0.05),
+          cexRow = 0.5,
+          cexCol = 0.9,
+          key = TRUE,
+          keysize = 1.5,
+          density.info = "histogram",
+          ColSideColors = c(rep("red",3),rep("blue",3), rep("green",3), rep("yellow",3)),
+          tracecol = NULL,
+          dendrogram = "both",
+          srtCol = 30)
+dev.off()
+
+tiff("figures/Heatmap2.tiff", res = 150, width = 5.5, height = 5.5, units = 'in')
+heatmap.2(HMdata,
+          Rowv = FALSE,
+          Colv = FALSE,
+          dendrogram = "none",
+          main = "Differentially expressed genes \n FDR < 0,1, logFC >=1",
+          scale = "row",
+          col = my_palette,
+          sepcolor = "white",
+          sepwidth = c(0.05,0.05),
+          cexRow = 0.5,
+          cexCol = 0.9,
+          key = TRUE,
+          keysize = 1.5,
+          density.info = "histogram",
+          ColSideColors = c(rep("red",3),rep("blue",3), rep("green",3), rep("yellow",3)),
+          tracecol = NULL,
+          srtCol = 30)
+dev.off()
+
+
+
+```
+
+### Biological significance of results
+
+Empleamos un enfoque estadístico llamado "Gene Set Analysis". Este análisis busca establecer si, dada una lista de genes seleccionados por su expresión diferencial entre 2 condiciones, si las funciones, procesos biológicos o rutas moleculares que los caracterízan aparecen en la lista con mayor frecuencia entre el resto de genes analizados. 
+
+Vamos a emplear  en "basic enrichment analysis" implementado en el paquete de Bioconductor `ReactomePA`. 
+
+Para este tipo de análisis se necesita un número de genes que sean de confianza, preferiblemente unos cuantos cientos mejor que unas docenas, por lo que se hace una selección menos restrictiva que en pasos anteriores. Una opción es incluir un FDR < 0.15 sin filtrar por un mínimo "fold-change".
+
+```{r selectGenes}
+
+listOfTables <- list(KOvsWT.COLD = topTab_KOvsWT.COLD, 
+                     KOvsWT.RT = topTab_KOvsWT.RT, 
+                     INT = topTab_INT)
+listOfSelected <- list()
+for(i in 1:length(listOfTables)){
+  # select the top table
+  topTab <- listOfTables[[i]]
+  #select the genes to be included in the analysis
+  whichGenes <- topTab["adj.P.Val"]<0.15
+  selectedIDs <- rownames(topTab)[whichGenes]
+  # convert the ID to Entrez
+  EntrezIDs <- select(mogene21sttranscriptcluster.db, selectedIDs, c("ENTREZID"))
+  EntrezIDs <- EntrezIDs$ENTREZID
+  listOfSelected[[i]] <- EntrezIDs
+  names(listOfSelected)[i] <- names(listOfTables)[i]
+  
+}
+sapply(listOfSelected, length)
+
+```
+
+El análisis tambien necesita los Entrez Identifiers para todos los genes analizados. 
+
+```{r}
+mapped_genes2GO <- mappedkeys(org.Mm.egGO)
+mapped_genes2KEGG <- mappedkeys(org.Mm.egPATH)
+mapped_genes <- union(mapped_genes2GO, mapped_genes2KEGG)
+```
+
+El análisis del significado biológico se aplicará únicamente a las primeras dos listas
+
+```{r biologicalSignificance}
+library(ReactomePA)
+
+listOfData <- listOfSelected[1:2]
+comparisonsNames <- names(listOfData)
+universe <- mapped_genes
+
+for(i in 1:length(listOfData)){
+  genesIn <- listOfData[[i]]
+  comparison <- comparisonsNames[i]
+  enrich.result <- enrichPathway(gene = genesIn, 
+                                  pvalueCutoff = 0.05, 
+                                  readable = T, 
+                                  pAdjustMethod = "BH", 
+                                  organism = "mouse", 
+                                  universe = universe)
+  
+  cat("##################################")
+  cat("\nConparisons: ", comparison, "\n")
+  print(head(enrich.results))
+  
+  if(length(rownames(enrich.results@result)) != 0) {
+    write.csv(as.data.frame(enrich.result), 
+              file = paste0("./results/", "ReactomePA.Results.", comparison, ".csv"),
+              row.names = FALSE)
+    
+    pdf(file = paste0("./results/", "ReactomePABarplot.", comparison, ".pdf"))
+      print(barplot(enrich.results, showCategory = 15, font.size = 4, 
+                    title = paste0("Reactome Pathway Analysis for", comparison, ".Barpolt")))
+      dev.off()
+      pdf(file = paste0("./results/", "ReactomePAcnetplot.", comparison, ".pdf"))
+          print(cnetplot(enrich.result, categorySize = "geneNum", 
+                         schowCategory = 15, vertex.label.cex = 0.75))
+          dev.off()
+  }
+}
+
+```
+
+Se obtiene un archivo .csv con un resumen de todos las rutas enriquezidas y los estadíscticos asociados, un bar plot con las mejores rutas enriquecidas y un plot con una network de las rutas enriquecidas y la realción entre lo genes incluidos.
+
+```{r network, fig.cap="Network obtaines from the Reactome enrichment analysis on the list obtained from the comparison between KO and WT in RT"}
+cnetplot(enrich.result, categorySize = "geneNum", schowCategory = 15, 
+         vertex.label.cex = 0.75)
+
+```
+
+
+```{r tableReacto, echo=FALSE}
+
+Tab.react <- read.csv2(file.path("./results/ReactomePA.Results.KOvsWT.RT.csv"), 
+                       sep = ",", header = TRUE, row.names = 1)
+Tac.react <- Tab.react[1:4, 1:5]
+knitr::kable(
+  Tab.react, booktabs = TRUE, caption = "First rows an columns for Reactome results on LOvsWT.RT.csv comparison"
+  )
+
+```
+
+### Summary of results
+
+```{r listOfFiles, echo=FALSE}
+listOfFiles <- read.table(file="results/listOfFiles.txt", sep="\t", head=T)
+knitr::kable(
+  listOfFiles, booktabs = TRUE,
+  caption = 'List of files generated in the analysis'
+)
+```
 
 

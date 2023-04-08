@@ -1,0 +1,4 @@
+"ID","Description","GeneRatio","BgRatio","pvalue","p.adjust","qvalue","geneID","Count"
+"R-MMU-75105","Fatty acyl-CoA biosynthesis","8/325","33/8486",2.54823070484885e-05,0.0178801200806033,0.0165165448650042,"Elovl2/Acsl5/Elovl7/Elovl3/Acsl4/Hsd17b12/Cbr4/Ppt2",8
+"R-MMU-8978868","Fatty acid metabolism","18/325","163/8486",4.86533879744309e-05,0.0178801200806033,0.0165165448650042,"Aloxe3/Ptgds/Abcd1/Acot1/Elovl2/Acsl5/Elovl7/Crot/Elovl3/Acads/Cpt1a/Acsl4/Acot6/Dpep2/Ptges3/Hsd17b12/Cbr4/Ppt2",18
+"R-MMU-75876","Synthesis of very long-chain fatty acyl-CoAs","6/325","22/8486",0.000133605874527472,0.0327334392592307,0.0302371189720069,"Elovl2/Acsl5/Elovl7/Elovl3/Acsl4/Hsd17b12",6
